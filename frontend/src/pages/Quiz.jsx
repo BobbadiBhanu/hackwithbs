@@ -166,7 +166,6 @@ const Quiz = () => {
                 });
 
                 await api.post('/quiz/history', {
-                    userId: user.id,
                     domain: config.mode === 'Syllabus' ? 'Custom Syllabus' : config.domain,
                     subdomain: config.mode,
                     score: finalTotalXP,

@@ -1,9 +1,17 @@
 const express = require('express');
 const router = express.Router();
 const { GoogleGenAI } = require('@google/genai');
+const rateLimit = require('express-rate-limit');
 const QuizHistory = require('../models/QuizHistory');
+const auth = require('../middleware/auth');
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+
+const generateLimiter = rateLimit({
+    windowMs: 60 * 1000, // 1 minute
+    max: 10,
+    message: { message: 'Too many quiz requests, slow down.' }
+});
 
 const fallbackQuizzes = {
     "DBMS": [
@@ -22,10 +30,11 @@ const fallbackQuizzes = {
     ]
 };
 
-router.post('/generate', async (req, res) => {
+// All quiz routes require authentication
+router.post('/generate', auth, generateLimiter, async (req, res) => {
     try {
         const { domain, subdomain, difficulty, length, mode, syllabus } = req.body;
-        
+
         let numQuestions = mode === 'Boss' ? 10 : Math.min(length || 4, 15);
         let dynamicInstruction = "";
 
@@ -70,70 +79,71 @@ router.post('/generate', async (req, res) => {
         });
 
         const quizData = JSON.parse(response.text);
-        
-        // Ensure the AI gave us the exact number we needed (pad with fallback if it failed)
+
         let finalQuestions = quizData;
         const requestedLength = mode === 'Boss' ? 10 : (length || 5);
         if (finalQuestions.length < requestedLength) {
             const domainFallback = fallbackQuizzes[domain] || fallbackQuizzes["DBMS"];
-            while(finalQuestions.length < requestedLength) {
-                // Loop through fallbacks
+            while (finalQuestions.length < requestedLength) {
                 finalQuestions.push(domainFallback[finalQuestions.length % domainFallback.length]);
             }
         }
 
         res.json({ questions: finalQuestions });
-
     } catch (error) {
         console.error("AI Generation Error / 503 Timeout. Using Fallback.");
         let requestedLength = req.body.mode === 'Boss' ? 10 : (req.body.length || 5);
         const domainFallback = fallbackQuizzes[req.body.domain] || fallbackQuizzes["DBMS"];
-        
+
         let finalQuestions = [];
-        for(let i=0; i < requestedLength; i++) {
-            // Loop the fallback array infinitely until we hit the requested length
+        for (let i = 0; i < requestedLength; i++) {
             finalQuestions.push(domainFallback[i % domainFallback.length]);
         }
         res.json({ questions: finalQuestions });
     }
 });
 
-router.post('/history', async (req, res) => {
+// userId is taken from the verified JWT token, not the request body
+router.post('/history', auth, async (req, res) => {
     try {
-        const { userId, domain, subdomain, score, totalQuestions, timeTaken } = req.body;
-        if(!userId) return res.status(400).json({ message: "No userId" });
+        const { domain, subdomain, score, totalQuestions, timeTaken } = req.body;
+        const userId = req.user.userId; // from JWT middleware
 
         const newHistory = new QuizHistory({
             userId, domain, subdomain, score, totalQuestions, timeTaken
         });
         await newHistory.save();
         res.status(201).json(newHistory);
-    } catch(err) {
+    } catch (err) {
         res.status(500).json({ message: "Failed to save history" });
     }
 });
 
-router.get('/history/:userId', async (req, res) => {
+router.get('/history/:userId', auth, async (req, res) => {
     try {
+        // Users can only fetch their own history
+        if (req.user.userId !== req.params.userId) {
+            return res.status(403).json({ message: 'Forbidden' });
+        }
         const history = await QuizHistory.find({ userId: req.params.userId }).sort({ completedAt: -1 }).limit(10);
         res.json(history);
-    } catch(err) {
+    } catch (err) {
         res.status(500).json({ message: "Failed to fetch history" });
     }
 });
 
-router.get('/ghost/:domain', async (req, res) => {
+router.get('/ghost/:domain', auth, async (req, res) => {
     try {
         const ghosts = await QuizHistory.find({ domain: req.params.domain, totalQuestions: { $gte: 3 } }).limit(10);
         if (ghosts.length > 0) {
             const ghost = ghosts[Math.floor(Math.random() * ghosts.length)];
             res.json({ timeTaken: ghost.timeTaken, score: ghost.score });
         } else {
-            res.json({ timeTaken: 25, score: 3 }); 
+            res.json({ timeTaken: 25, score: 3 });
         }
-    } catch(err) {
-        res.json({ timeTaken: 25, score: 3 }); 
+    } catch (err) {
+        res.json({ timeTaken: 25, score: 3 });
     }
-})
+});
 
 module.exports = router;
