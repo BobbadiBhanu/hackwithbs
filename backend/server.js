@@ -15,10 +15,10 @@ const allowedOrigins = process.env.ALLOWED_ORIGINS
 
 app.use(cors({
     origin: (origin, callback) => {
-        // allow requests with no origin (curl, mobile, server-to-server)
         if (!origin) return callback(null, true);
         if (allowedOrigins.includes(origin)) return callback(null, true);
-        // in development allow all
+        // allow all vercel preview deployments for this project
+        if (origin.match(/^https:\/\/hackwithbs.*\.vercel\.app$/)) return callback(null, true);
         if (process.env.NODE_ENV !== 'production') return callback(null, true);
         callback(null, false);
     },
