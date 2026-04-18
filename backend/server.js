@@ -10,20 +10,23 @@ const app = express();
 app.use(express.json({ limit: '10kb' })); // prevent large payload attacks
 
 const allowedOrigins = process.env.ALLOWED_ORIGINS
-    ? process.env.ALLOWED_ORIGINS.split(',')
+    ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
     : ['http://localhost:5173'];
 
 app.use(cors({
     origin: (origin, callback) => {
-        // allow requests with no origin (e.g. mobile apps, curl) in dev
-        if (!origin || allowedOrigins.includes(origin)) {
-            callback(null, true);
-        } else {
-            callback(new Error('Not allowed by CORS'));
-        }
+        // allow requests with no origin (curl, mobile, server-to-server)
+        if (!origin) return callback(null, true);
+        if (allowedOrigins.includes(origin)) return callback(null, true);
+        // in development allow all
+        if (process.env.NODE_ENV !== 'production') return callback(null, true);
+        callback(null, false);
     },
     credentials: true
 }));
+
+// Handle preflight requests
+app.options('*', cors());
 
 // Routes
 app.use('/api/auth', authRoutes);
