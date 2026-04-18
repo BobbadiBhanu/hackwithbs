@@ -25,9 +25,6 @@ app.use(cors({
     credentials: true
 }));
 
-// Handle preflight requests (Express 5 compatible wildcard)
-app.options('(.*)', cors());
-
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/quiz', quizRoutes);
